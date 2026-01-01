@@ -29,19 +29,19 @@ func main() {
 
 	apiCfg := &apiConfig{}
 
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /api/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("OK"))
 	})
 
-	mux.HandleFunc("GET /metrics", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /api/metrics", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("Hits: " + fmt.Sprint(apiCfg.fileserverHits.Load())))
 	})
 
-	mux.HandleFunc("POST /reset", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /api/reset", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		apiCfg.fileserverHits.Store(0)
