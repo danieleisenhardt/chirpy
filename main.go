@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -33,6 +34,33 @@ func main() {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("OK"))
+	})
+
+	mux.HandleFunc("POST /api/validate_chirp", func(w http.ResponseWriter, r *http.Request) {
+		type parameters = struct {
+			Body string `json:"body"`
+		}
+		type successResponse = struct {
+			Valid       bool   `json:"valid"`
+			CleanedBody string `json:"cleaned_body"`
+		}
+
+		decoder := json.NewDecoder(r.Body)
+		params := parameters{}
+		err := decoder.Decode(&params)
+		if err != nil {
+			log.Printf("Error decoding JSON: %s", err)
+			respondWithError(w, http.StatusBadRequest, "Error decoding JSON")
+			return
+		}
+
+		if len(params.Body) > 140 {
+			respondWithError(w, http.StatusBadRequest, "Chirp is too long")
+			return
+		}
+		cleanedBody := replaceBadWords(params.Body)
+
+		respondWithJSON(w, http.StatusOK, successResponse{Valid: true, CleanedBody: cleanedBody})
 	})
 
 	mux.HandleFunc("GET /admin/metrics", func(w http.ResponseWriter, r *http.Request) {
