@@ -1,6 +1,16 @@
 package main
 
 import (
+	"database/sql"
+	"os"
+
+	"github.com/danieleisenhardt/chirpy/internal/database"
+	"github.com/google/uuid"
+	"github.com/joho/godotenv"
+	_ "github.com/lib/pq"
+)
+
+import (
 	"encoding/json"
 	"fmt"
 	"log"
@@ -10,6 +20,7 @@ import (
 
 type apiConfig struct {
 	fileserverHits atomic.Int32
+	dbConfig       *database.Queries
 }
 
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
@@ -20,6 +31,12 @@ func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
 }
 
 func main() {
+	_ = godotenv.Load()
+	dbURL := os.Getenv("DB_URL")
+	platform := os.Getenv("PLATFORM")
+	db, _ := sql.Open("postgres", dbURL)
+	dbQueries := database.New(db)
+
 	port := "8080"
 
 	mux := http.NewServeMux()
@@ -28,7 +45,10 @@ func main() {
 		Handler: mux,
 	}
 
-	apiCfg := &apiConfig{}
+	apiCfg := &apiConfig{
+		atomic.Int32{},
+		dbQueries,
+	}
 
 	mux.HandleFunc("GET /api/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -63,6 +83,41 @@ func main() {
 		respondWithJSON(w, http.StatusOK, successResponse{Valid: true, CleanedBody: cleanedBody})
 	})
 
+	mux.HandleFunc("POST /api/users", func(w http.ResponseWriter, r *http.Request) {
+		type parameters = struct {
+			Email string `json:"email"`
+		}
+		type successResponse = struct {
+			Id        uuid.NullUUID `json:"id"`
+			CreatedAt string        `json:"created_at"`
+			UpdatedAt string        `json:"updated_at"`
+			Email     string        `json:"email"`
+		}
+
+		decoder := json.NewDecoder(r.Body)
+		params := parameters{}
+		err := decoder.Decode(&params)
+		if err != nil {
+			log.Printf("Error decoding JSON: %s", err)
+			respondWithError(w, http.StatusBadRequest, "Error decoding JSON")
+			return
+		}
+
+		user, err := apiCfg.dbConfig.CreateUser(r.Context(), params.Email)
+		if err != nil {
+			log.Printf("Error saving user: %s", err)
+			respondWithError(w, http.StatusInternalServerError, "Error saving user")
+			return
+		}
+
+		respondWithJSON(w, http.StatusCreated, successResponse{
+			Id:        user.ID,
+			CreatedAt: user.CreatedAt.String(),
+			UpdatedAt: user.UpdatedAt.String(),
+			Email:     user.Email,
+		})
+	})
+
 	mux.HandleFunc("GET /admin/metrics", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
@@ -71,9 +126,21 @@ func main() {
 	})
 
 	mux.HandleFunc("POST /admin/reset", func(w http.ResponseWriter, r *http.Request) {
+		if platform != "dev" {
+			respondWithError(w, http.StatusBadRequest, "Endpoint not available on this platform")
+			return
+		}
+
+		err := apiCfg.dbConfig.TruncateUsers(r.Context())
+		if err != nil {
+			log.Printf("Error truncating users table")
+			respondWithError(w, http.StatusInternalServerError, "Error truncating users table")
+			return
+		}
+		apiCfg.fileserverHits.Store(0)
+
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
-		apiCfg.fileserverHits.Store(0)
 		_, _ = w.Write([]byte("OK"))
 	})
 
