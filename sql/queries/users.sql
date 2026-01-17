@@ -9,4 +9,4 @@ INSERT INTO users (id, created_at, updated_at, email)
     RETURNING *;
 
 -- name: TruncateUsers :exec
-TRUNCATE TABLE users;
+TRUNCATE TABLE users CASCADE;

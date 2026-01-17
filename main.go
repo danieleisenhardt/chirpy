@@ -56,13 +56,17 @@ func main() {
 		_, _ = w.Write([]byte("OK"))
 	})
 
-	mux.HandleFunc("POST /api/validate_chirp", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /api/chirps", func(w http.ResponseWriter, r *http.Request) {
 		type parameters = struct {
-			Body string `json:"body"`
+			Body   string        `json:"body"`
+			UserID uuid.NullUUID `json:"user_id"`
 		}
 		type successResponse = struct {
-			Valid       bool   `json:"valid"`
-			CleanedBody string `json:"cleaned_body"`
+			ID        uuid.UUID     `json:"id"`
+			CreatedAt string        `json:"created_at"`
+			UpdatedAt string        `json:"updated_at"`
+			Body      string        `json:"body"`
+			UserID    uuid.NullUUID `json:"user_id"`
 		}
 
 		decoder := json.NewDecoder(r.Body)
@@ -73,14 +77,26 @@ func main() {
 			respondWithError(w, http.StatusBadRequest, "Error decoding JSON")
 			return
 		}
-
 		if len(params.Body) > 140 {
 			respondWithError(w, http.StatusBadRequest, "Chirp is too long")
 			return
 		}
 		cleanedBody := replaceBadWords(params.Body)
 
-		respondWithJSON(w, http.StatusOK, successResponse{Valid: true, CleanedBody: cleanedBody})
+		//chirp, err := apiCfg.dbConfig.CreateChirp(r.Context(), cleanedBody, params.UserID)
+		chirp, err := apiCfg.dbConfig.CreateChirp(r.Context(), database.CreateChirpParams{Body: cleanedBody, UserID: params.UserID})
+		if err != nil {
+			log.Printf("Error saving user: %s", err)
+			respondWithError(w, http.StatusInternalServerError, "Error saving user")
+			return
+		}
+		respondWithJSON(w, http.StatusCreated, successResponse{
+			ID:        chirp.ID,
+			CreatedAt: chirp.CreatedAt.String(),
+			UpdatedAt: chirp.UpdatedAt.String(),
+			Body:      chirp.Body,
+			UserID:    chirp.UserID,
+		})
 	})
 
 	mux.HandleFunc("POST /api/users", func(w http.ResponseWriter, r *http.Request) {
@@ -88,10 +104,10 @@ func main() {
 			Email string `json:"email"`
 		}
 		type successResponse = struct {
-			Id        uuid.NullUUID `json:"id"`
-			CreatedAt string        `json:"created_at"`
-			UpdatedAt string        `json:"updated_at"`
-			Email     string        `json:"email"`
+			Id        uuid.UUID `json:"id"`
+			CreatedAt string    `json:"created_at"`
+			UpdatedAt string    `json:"updated_at"`
+			Email     string    `json:"email"`
 		}
 
 		decoder := json.NewDecoder(r.Body)
