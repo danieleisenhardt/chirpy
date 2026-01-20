@@ -56,6 +56,38 @@ func main() {
 		_, _ = w.Write([]byte("OK"))
 	})
 
+	mux.HandleFunc("GET /api/chirps", func(w http.ResponseWriter, r *http.Request) {
+		type responseItem struct {
+			ID        string        `json:"id"`
+			CreatedAt string        `json:"created_at"`
+			UpdatedAt string        `json:"updated_at"`
+			Body      string        `json:"body"`
+			UserID    uuid.NullUUID `json:"user_id"`
+		}
+
+		chrips, err := apiCfg.dbConfig.ListChirps(r.Context())
+		if err != nil {
+			log.Printf("Error retrieving chirps: %s", err)
+			respondWithError(w, http.StatusInternalServerError, "Error retrieving chirps")
+			return
+		}
+
+		responseData := make([]responseItem, 0, len(chrips))
+		for _, chrip := range chrips {
+			responseData = append(responseData, responseItem{
+				ID:        chrip.ID.String(),
+				CreatedAt: chrip.CreatedAt.String(),
+				UpdatedAt: chrip.UpdatedAt.String(),
+				Body:      chrip.Body,
+				UserID:    chrip.UserID,
+			})
+		}
+
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		respondWithJSON(w, http.StatusCreated, responseData)
+	})
+
 	mux.HandleFunc("POST /api/chirps", func(w http.ResponseWriter, r *http.Request) {
 		type parameters = struct {
 			Body   string        `json:"body"`
