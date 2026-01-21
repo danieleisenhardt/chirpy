@@ -23,6 +23,14 @@ type apiConfig struct {
 	dbConfig       *database.Queries
 }
 
+type responseChirp = struct {
+	ID        string        `json:"id"`
+	CreatedAt string        `json:"created_at"`
+	UpdatedAt string        `json:"updated_at"`
+	Body      string        `json:"body"`
+	UserID    uuid.NullUUID `json:"user_id"`
+}
+
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		cfg.fileserverHits.Add(1)
@@ -57,14 +65,6 @@ func main() {
 	})
 
 	mux.HandleFunc("GET /api/chirps", func(w http.ResponseWriter, r *http.Request) {
-		type responseItem struct {
-			ID        string        `json:"id"`
-			CreatedAt string        `json:"created_at"`
-			UpdatedAt string        `json:"updated_at"`
-			Body      string        `json:"body"`
-			UserID    uuid.NullUUID `json:"user_id"`
-		}
-
 		chrips, err := apiCfg.dbConfig.ListChirps(r.Context())
 		if err != nil {
 			log.Printf("Error retrieving chirps: %s", err)
@@ -72,9 +72,9 @@ func main() {
 			return
 		}
 
-		responseData := make([]responseItem, 0, len(chrips))
+		responseData := make([]responseChirp, 0, len(chrips))
 		for _, chrip := range chrips {
-			responseData = append(responseData, responseItem{
+			responseData = append(responseData, responseChirp{
 				ID:        chrip.ID.String(),
 				CreatedAt: chrip.CreatedAt.String(),
 				UpdatedAt: chrip.UpdatedAt.String(),
@@ -83,22 +83,35 @@ func main() {
 			})
 		}
 
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
-		respondWithJSON(w, http.StatusCreated, responseData)
+		respondWithJSON(w, http.StatusOK, responseData)
+	})
+
+	mux.HandleFunc("GET /api/chirps/{chirpID}", func(w http.ResponseWriter, r *http.Request) {
+		id, err := uuid.Parse(r.PathValue("chirpID"))
+		if err != nil {
+			respondWithError(w, http.StatusBadRequest, "invalid chirpID")
+			return
+		}
+
+		chirp, err := apiCfg.dbConfig.GetChirp(r.Context(), id)
+		if err != nil {
+			respondWithError(w, http.StatusNotFound, "not found")
+			return
+		}
+
+		respondWithJSON(w, http.StatusOK, responseChirp{
+			ID:        chirp.ID.String(),
+			CreatedAt: chirp.CreatedAt.String(),
+			UpdatedAt: chirp.UpdatedAt.String(),
+			Body:      chirp.Body,
+			UserID:    chirp.UserID,
+		})
 	})
 
 	mux.HandleFunc("POST /api/chirps", func(w http.ResponseWriter, r *http.Request) {
 		type parameters = struct {
 			Body   string        `json:"body"`
 			UserID uuid.NullUUID `json:"user_id"`
-		}
-		type successResponse = struct {
-			ID        uuid.UUID     `json:"id"`
-			CreatedAt string        `json:"created_at"`
-			UpdatedAt string        `json:"updated_at"`
-			Body      string        `json:"body"`
-			UserID    uuid.NullUUID `json:"user_id"`
 		}
 
 		decoder := json.NewDecoder(r.Body)
@@ -115,15 +128,14 @@ func main() {
 		}
 		cleanedBody := replaceBadWords(params.Body)
 
-		//chirp, err := apiCfg.dbConfig.CreateChirp(r.Context(), cleanedBody, params.UserID)
 		chirp, err := apiCfg.dbConfig.CreateChirp(r.Context(), database.CreateChirpParams{Body: cleanedBody, UserID: params.UserID})
 		if err != nil {
 			log.Printf("Error saving user: %s", err)
 			respondWithError(w, http.StatusInternalServerError, "Error saving user")
 			return
 		}
-		respondWithJSON(w, http.StatusCreated, successResponse{
-			ID:        chirp.ID,
+		respondWithJSON(w, http.StatusCreated, responseChirp{
+			ID:        chirp.ID.String(),
 			CreatedAt: chirp.CreatedAt.String(),
 			UpdatedAt: chirp.UpdatedAt.String(),
 			Body:      chirp.Body,
