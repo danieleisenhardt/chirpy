@@ -18,6 +18,10 @@ import (
 	"sync/atomic"
 )
 
+import (
+	"github.com/danieleisenhardt/chirpy/internal/auth"
+)
+
 type apiConfig struct {
 	fileserverHits atomic.Int32
 	dbConfig       *database.Queries
@@ -145,7 +149,8 @@ func main() {
 
 	mux.HandleFunc("POST /api/users", func(w http.ResponseWriter, r *http.Request) {
 		type parameters = struct {
-			Email string `json:"email"`
+			Email    string `json:"email"`
+			Password string `json:"password"`
 		}
 		type successResponse = struct {
 			Id        uuid.UUID `json:"id"`
@@ -163,7 +168,17 @@ func main() {
 			return
 		}
 
-		user, err := apiCfg.dbConfig.CreateUser(r.Context(), params.Email)
+		hashedPassword, err := auth.HashPassword(params.Password)
+		if err != nil {
+			log.Printf("Error hashing password: %s", err)
+			respondWithError(w, http.StatusInternalServerError, "Error hashing password")
+			return
+		}
+
+		user, err := apiCfg.dbConfig.CreateUser(r.Context(), database.CreateUserParams{
+			Email:          params.Email,
+			HashedPassword: sql.NullString{String: hashedPassword, Valid: true},
+		})
 		if err != nil {
 			log.Printf("Error saving user: %s", err)
 			respondWithError(w, http.StatusInternalServerError, "Error saving user")
@@ -171,6 +186,46 @@ func main() {
 		}
 
 		respondWithJSON(w, http.StatusCreated, successResponse{
+			Id:        user.ID,
+			CreatedAt: user.CreatedAt.String(),
+			UpdatedAt: user.UpdatedAt.String(),
+			Email:     user.Email,
+		})
+	})
+
+	mux.HandleFunc("POST /api/login", func(w http.ResponseWriter, r *http.Request) {
+		type parameters = struct {
+			Email    string `json:"email"`
+			Password string `json:"password"`
+		}
+		type successResponse = struct {
+			Id        uuid.UUID `json:"id"`
+			CreatedAt string    `json:"created_at"`
+			UpdatedAt string    `json:"updated_at"`
+			Email     string    `json:"email"`
+		}
+
+		decoder := json.NewDecoder(r.Body)
+		params := parameters{}
+		err := decoder.Decode(&params)
+		if err != nil {
+			log.Printf("Error decoding JSON: %s", err)
+			respondWithError(w, http.StatusBadRequest, "Error decoding JSON")
+			return
+		}
+
+		user, err := apiCfg.dbConfig.GetUserByEmail(r.Context(), params.Email)
+		if err != nil {
+			respondWithError(w, http.StatusUnauthorized, "unauthorized")
+			return
+		}
+
+		if !auth.CheckPasswordHash(params.Password, user.HashedPassword.String) {
+			respondWithError(w, http.StatusUnauthorized, "unauthorized")
+			return
+		}
+
+		respondWithJSON(w, http.StatusOK, successResponse{
 			Id:        user.ID,
 			CreatedAt: user.CreatedAt.String(),
 			UpdatedAt: user.UpdatedAt.String(),
