@@ -220,8 +220,10 @@ func main() {
 			return
 		}
 
-		if !auth.CheckPasswordHash(params.Password, user.HashedPassword.String) {
-			respondWithError(w, http.StatusUnauthorized, "unauthorized")
+		match, err := auth.CheckPasswordHash(params.Password, user.HashedPassword.String)
+		if err != nil || !match {
+			log.Printf("Error checking password: %s", err)
+			respondWithError(w, http.StatusUnauthorized, "Incorrect email or password")
 			return
 		}
 
