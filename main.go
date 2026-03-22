@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"os"
+	"time"
 
 	"github.com/danieleisenhardt/chirpy/internal/database"
 	"github.com/google/uuid"
@@ -46,6 +47,7 @@ func main() {
 	_ = godotenv.Load()
 	dbURL := os.Getenv("DB_URL")
 	platform := os.Getenv("PLATFORM")
+	jwtSecret := os.Getenv("JWT_SECRET")
 	db, _ := sql.Open("postgres", dbURL)
 	dbQueries := database.New(db)
 
@@ -118,9 +120,21 @@ func main() {
 			UserID uuid.NullUUID `json:"user_id"`
 		}
 
+		token, err := auth.GetBearerToken(r.Header)
+		if err != nil {
+			respondWithError(w, http.StatusUnauthorized, "missing or invalid authorization header")
+			return
+		}
+
+		userID, err := auth.ValidateJWT(token, jwtSecret)
+		if err != nil {
+			respondWithError(w, http.StatusUnauthorized, "invalid authorization header")
+			return
+		}
+
 		decoder := json.NewDecoder(r.Body)
 		params := parameters{}
-		err := decoder.Decode(&params)
+		err = decoder.Decode(&params)
 		if err != nil {
 			log.Printf("Error decoding JSON: %s", err)
 			respondWithError(w, http.StatusBadRequest, "Error decoding JSON")
@@ -132,7 +146,7 @@ func main() {
 		}
 		cleanedBody := replaceBadWords(params.Body)
 
-		chirp, err := apiCfg.dbConfig.CreateChirp(r.Context(), database.CreateChirpParams{Body: cleanedBody, UserID: params.UserID})
+		chirp, err := apiCfg.dbConfig.CreateChirp(r.Context(), database.CreateChirpParams{Body: cleanedBody, UserID: userID})
 		if err != nil {
 			log.Printf("Error saving user: %s", err)
 			respondWithError(w, http.StatusInternalServerError, "Error saving user")
@@ -203,6 +217,7 @@ func main() {
 			CreatedAt string    `json:"created_at"`
 			UpdatedAt string    `json:"updated_at"`
 			Email     string    `json:"email"`
+			Token     string    `json:"token"`
 		}
 
 		decoder := json.NewDecoder(r.Body)
@@ -227,11 +242,15 @@ func main() {
 			return
 		}
 
+		token, err := auth.MakeJWT(user.ID, jwtSecret, 30*time.Minute)
+		fmt.Println(token)
+
 		respondWithJSON(w, http.StatusOK, successResponse{
 			Id:        user.ID,
 			CreatedAt: user.CreatedAt.String(),
 			UpdatedAt: user.UpdatedAt.String(),
 			Email:     user.Email,
+			Token:     token,
 		})
 	})
 
